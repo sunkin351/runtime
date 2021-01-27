@@ -1221,42 +1221,76 @@ namespace System.Text.RegularExpressions
                 throw MakeException(RegexParseError.UnescapedEndingBackslash, SR.UnescapedEndingBackslash);
             }
 
-            int backpos = Textpos();
+            int backpos = Textpos(), type = RegexNode.Ref;
             char close = '\0';
             bool angled = false;
             char ch = RightChar();
 
-            // allow \k<foo> instead of \<foo>, which is now deprecated
-
-            if (ch == 'k')
+            switch (ch)
             {
-                if (CharsRight() >= 2)
-                {
-                    MoveRight();
-                    ch = RightCharMoveRight();
-                    if (ch == '<' || ch == '\'')
+                case 'k': // allow \k<foo> instead of \<foo>, which is now deprecated
+                    if (CharsRight() >= 2)
+                    {
+                        MoveRight();
+                        ch = RightCharMoveRight();
+                        if (ch == '<' || ch == '\'')
+                        {
+                            angled = true;
+                            close = (ch == '\'') ? '\'' : '>';
+                        }
+                    }
+
+                    if (!angled || CharsRight() <= 0)
+                    {
+                        throw MakeException(RegexParseError.MalformedNamedReference, SR.MalformedNamedReference);
+                    }
+
+                    ch = RightChar();
+                    break;
+                case 'g':
+                    //Currently setup to act like \k, but takes into account that \g accepts having braces
+                    if (CharsRight() >= 2)
+                    {
+                        MoveRight();
+                        ch = RightCharMoveRight();
+                        if (ch == '{' || ch == '<' || ch == '\'')
+                        {
+                            angled = true;
+
+                            switch (ch)
+                            {
+                                case '{':
+                                    close = '}';
+                                    break;
+                                case '\'':
+                                    close = '\'';
+                                    break;
+                                case '<':
+                                    close = '>';
+                                    //type = ...; //recursion syntax
+                                    break;
+                            }
+                        }
+                    }
+
+                    if (!angled || CharsRight() <= 0)
+                    {
+                        throw MakeException(RegexParseError.MalformedNamedReference, SR.MalformedNamedReference);
+                    }
+
+                    ch = RightChar();
+                    break;
+                case '<':
+                case '\'':
+                    // Note \<foo> and \'foo' cases
+                    if (CharsRight() > 1)
                     {
                         angled = true;
                         close = (ch == '\'') ? '\'' : '>';
+                        MoveRight();
+                        ch = RightChar();
                     }
-                }
-
-                if (!angled || CharsRight() <= 0)
-                {
-                    throw MakeException(RegexParseError.MalformedNamedReference, SR.MalformedNamedReference);
-                }
-
-                ch = RightChar();
-            }
-
-            // Note angle without \g
-
-            else if ((ch == '<' || ch == '\'') && CharsRight() > 1)
-            {
-                angled = true;
-                close = (ch == '\'') ? '\'' : '>';
-                MoveRight();
-                ch = RightChar();
+                    break;
             }
 
             // Try to parse backreference: \<1>
@@ -1269,7 +1303,7 @@ namespace System.Text.RegularExpressions
                 {
                     return
                         scanOnly ? null :
-                        IsCaptureSlot(capnum) ? new RegexNode(RegexNode.Ref, _options, capnum) :
+                        IsCaptureSlot(capnum) ? new RegexNode(type, _options, capnum) :
                         throw MakeException(RegexParseError.UndefinedNumberedReference, SR.Format(SR.UndefinedNumberedReference, capnum.ToString()));
                 }
             }
@@ -1335,7 +1369,7 @@ namespace System.Text.RegularExpressions
                 {
                     return
                         scanOnly ? null :
-                        IsCaptureName(capname) ? new RegexNode(RegexNode.Ref, _options, CaptureSlotFromName(capname)) :
+                        IsCaptureName(capname) ? new RegexNode(type, _options, CaptureSlotFromName(capname)) :
                         throw MakeException(RegexParseError.UndefinedNamedReference, SR.Format(SR.UndefinedNamedReference, capname));
                 }
             }
